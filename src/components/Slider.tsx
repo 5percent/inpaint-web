@@ -13,10 +13,13 @@ export default function Slider(props: SliderProps) {
   const step = ((max || 100) - (min || 0)) / 100
 
   return (
-    <div className="inline-flex items-center space-x-4 text-black">
-      <span>{label}</span>
+    <div className="inline-flex items-center space-x-4 text-sm text-slate-300">
+      <span className="min-w-[72px] text-slate-400">{label}</span>
       <input
-        className={['appearance-none rounded-lg h-4', 'bg-primary'].join(' ')}
+        className={[
+          'h-2 w-full appearance-none rounded-full border border-white/10 bg-white/10 accent-[#2f8cff]',
+          'outline-none',
+        ].join(' ')}
         type="range"
         step={step}
         min={min}

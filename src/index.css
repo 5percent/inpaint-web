@@ -1,3 +1,33 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    background: radial-gradient(
+        circle at top,
+        rgba(56, 189, 248, 0.14),
+        transparent 26%
+      ),
+      linear-gradient(180deg, #181c22 0%, #111317 52%, #0b0d10 100%);
+    background-color: #0b0d10;
+    color: #e5ebf3;
+    font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  }
+
+  body {
+    min-height: 100vh;
+    background: inherit;
+    color: inherit;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background: rgba(47, 140, 255, 0.45);
+    color: #f8fbff;
+  }
+}

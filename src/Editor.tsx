@@ -17,7 +17,6 @@ import * as m from './paraglide/messages'
 interface EditorProps {
   file?: File
   onFileSelection: (file: File) => void | Promise<void>
-  onStartWithDemoImage: (image: string) => void | Promise<void>
   onReset: () => void
 }
 
@@ -29,7 +28,7 @@ interface Line {
 function drawLines(
   ctx: CanvasRenderingContext2D,
   lines: Line[],
-  color = 'rgba(255, 0, 0, 0.5)'
+  color = 'rgba(47, 140, 255, 0.45)'
 ) {
   ctx.strokeStyle = color
   ctx.lineCap = 'round'
@@ -49,7 +48,7 @@ function drawLines(
 
 const BRUSH_HIDE_ON_SLIDER_CHANGE_TIMEOUT = 2000
 export default function Editor(props: EditorProps) {
-  const { file, onFileSelection, onStartWithDemoImage, onReset } = props
+  const { file, onFileSelection, onReset } = props
   const [brushSize, setBrushSize] = useState(40)
   const [original, isOriginalLoaded] = useImage(file)
   const [renders, setRenders] = useState<HTMLImageElement[]>([])
@@ -77,7 +76,6 @@ export default function Editor(props: EditorProps) {
   const [downloadProgress, setDownloadProgress] = useState(0)
   const [errorMessage, setErrorMessage] = useState<string>()
   const windowSize = useWindowSize()
-  const demoImages = ['bag', 'dog', 'car', 'bird', 'jacket', 'shoe', 'paris']
   const toolsDisabled = !file || isInpaintingLoading
   const canApplyMask = Boolean(
     file && pendingLines.some(line => line.pts.length)
@@ -456,20 +454,20 @@ export default function Editor(props: EditorProps) {
         return (
           <div
             key={item.id}
-            className="relative flex h-[104px] w-full shrink-0 items-center justify-center rounded-2xl border border-stone-200 bg-white p-2"
+            className="group relative flex h-[104px] w-full shrink-0 items-center justify-center rounded-2xl border border-white/10 p-2 shadow-[0_16px_30px_rgba(0,0,0,0.28)] transition duration-150 ease-out hover:border-primary/30 hover:shadow-[0_20px_36px_rgba(0,0,0,0.36)]"
           >
             <img
               src={item.image.src}
               alt="render"
-              className="max-h-full max-w-full rounded-sm object-contain"
+              className="max-h-full max-w-full rounded-xl object-contain shadow-[0_12px_28px_rgba(0,0,0,0.35)]"
               style={{
                 height: '90px',
               }}
             />
             <Button
               className={[
-                'cursor-pointer rounded-sm',
-                item.isOriginal ? 'opacity-100' : 'hover:opacity-100 opacity-0',
+                'cursor-pointer rounded-xl border-0 bg-transparent text-transparent shadow-none',
+                'opacity-100 hover:bg-transparent hover:text-slate-200',
               ].join(' ')}
               style={{
                 position: 'absolute',
@@ -477,7 +475,6 @@ export default function Editor(props: EditorProps) {
                 left: '0',
                 width: '100%',
                 height: '100%',
-                backgroundColor: 'rgba(0, 0, 0, 0.5)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -487,11 +484,12 @@ export default function Editor(props: EditorProps) {
               onLeave={draw}
             >
               <div
-                style={{
-                  color: '#fff',
-                  fontSize: '12px',
-                  textAlign: 'center',
-                }}
+                className={[
+                  'rounded-full border border-white/10 bg-[#11151b]/82 px-3 py-1 text-center text-xs text-slate-200 transition duration-150 ease-out',
+                  item.isOriginal
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover:opacity-100',
+                ].join(' ')}
               >
                 {item.isOriginal ? '原图' : '回到这'}
                 <br />
@@ -561,15 +559,15 @@ export default function Editor(props: EditorProps) {
   return (
     <div className="flex min-w-0 flex-1 gap-4">
       <aside className="hidden w-[280px] shrink-0 lg:block">
-        <div className="flex h-full flex-col rounded-3xl border border-stone-200 bg-white p-5 shadow-sm">
+        <div className="flex h-full flex-col rounded-3xl border border-white/10 bg-[#14181d]/92 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl">
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
               History
             </p>
-            <h2 className="mt-2 text-2xl font-semibold text-slate-900">
+            <h2 className="mt-2 text-2xl font-semibold text-slate-100">
               Image Timeline
             </h2>
-            <p className="mt-2 text-sm text-slate-500">
+            <p className="mt-2 text-sm leading-6 text-slate-400">
               This workspace only handles one image at a time. The original
               image stays pinned at the top and each processed result is
               appended below it.
@@ -579,8 +577,8 @@ export default function Editor(props: EditorProps) {
           <div
             ref={historyListRef}
             className={[
-              'mt-6 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-2xl border border-stone-200 bg-stone-50 p-3',
-              'scrollbar-thin scrollbar-thumb-black scrollbar-track-primary',
+              'mt-6 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-2xl border border-white/8 bg-black/20 p-3',
+              'scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent',
             ].join(' ')}
           >
             {historyItems.length > 0 ? (
@@ -597,7 +595,7 @@ export default function Editor(props: EditorProps) {
 
       <section
         className={[
-          'flex min-w-0 flex-1 flex-col rounded-3xl border border-stone-200 bg-white p-4 shadow-sm',
+          'flex min-w-0 flex-1 flex-col rounded-3xl border border-white/10 bg-[#14181d]/92 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl',
           isInpaintingLoading ? 'animate-pulse-fast pointer-events-none' : '',
         ].join(' ')}
       >
@@ -606,8 +604,8 @@ export default function Editor(props: EditorProps) {
           ref={canvasDiv}
         >
           {file ? (
-            <div className="relative flex w-full items-center justify-center overflow-hidden rounded-2xl border border-stone-200 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.95),_rgba(241,245,249,0.92)_45%,_rgba(226,232,240,0.85))] p-6">
-              <div className="relative flex max-h-full max-w-full items-center justify-center rounded-[28px] bg-white/90 p-3 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur-sm">
+            <div className="relative flex w-full items-center justify-center overflow-hidden rounded-2xl border border-white/8 bg-[radial-gradient(circle_at_top,_rgba(47,140,255,0.16),_rgba(18,22,28,0.94)_42%,_rgba(10,12,15,0.98))] p-6">
+              <div className="relative flex max-h-full max-w-full items-center justify-center rounded-[28px] border border-white/8 bg-[#1a1f26]/92 p-3 shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-sm">
                 <canvas
                   className="rounded-xl"
                   style={showBrush ? { cursor: 'none' } : {}}
@@ -652,7 +650,7 @@ export default function Editor(props: EditorProps) {
                       transitionDuration: '300ms',
                     }}
                   >
-                    <span className="absolute left-1 bottom-0 rounded bg-black bg-opacity-25 p-1 text-white select-none">
+                    <span className="absolute left-1 bottom-0 rounded bg-black/50 p-1 text-white select-none">
                       original
                     </span>
                     <div
@@ -689,10 +687,10 @@ export default function Editor(props: EditorProps) {
                 </div>
               </div>
               {isInpaintingLoading && (
-                <div className="absolute inset-0 z-10 flex h-full w-full items-center justify-center bg-white bg-opacity-80">
+                <div className="absolute inset-0 z-10 flex h-full w-full items-center justify-center bg-black/55 backdrop-blur-sm">
                   <div
                     ref={modalRef}
-                    className="w-4/5 space-y-5 text-xl sm:w-1/2"
+                    className="w-4/5 space-y-5 rounded-3xl border border-white/10 bg-[#161a20]/95 p-8 text-xl text-slate-100 shadow-[0_24px_80px_rgba(0,0,0,0.45)] sm:w-1/2"
                   >
                     <p>正在处理中，请耐心等待。。。</p>
                     <p>It is being processed, please be patient...</p>
@@ -702,14 +700,14 @@ export default function Editor(props: EditorProps) {
               )}
             </div>
           ) : (
-            <div className="flex w-full flex-col items-center justify-center rounded-2xl border border-dashed border-stone-300 bg-stone-50 px-6 py-10 text-center">
+            <div className="flex w-full flex-col items-center justify-center rounded-2xl border border-dashed border-white/12 bg-black/20 px-6 py-10 text-center">
               <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
                 Display
               </p>
-              <h2 className="mt-3 text-3xl font-semibold text-slate-900">
+              <h2 className="mt-3 text-3xl font-semibold text-slate-100">
                 Upload an image to start editing
               </h2>
-              <p className="mt-3 max-w-2xl text-sm text-slate-500">
+              <p className="mt-3 max-w-2xl text-sm text-slate-400">
                 The center panel is used for previewing the image, drawing masks
                 on the canvas and checking processing history.
               </p>
@@ -717,46 +715,24 @@ export default function Editor(props: EditorProps) {
               <div className="mt-8 h-72 w-full max-w-3xl">
                 <FileSelect onSelection={onFileSelection} />
               </div>
-
-              <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-                <span className="text-sm text-slate-500">
-                  {m.try_it_images()}
-                </span>
-                {demoImages.map(image => (
-                  <div
-                    key={image}
-                    onClick={() => onStartWithDemoImage(image)}
-                    role="button"
-                    onKeyDown={() => onStartWithDemoImage(image)}
-                    tabIndex={-1}
-                    className="overflow-hidden rounded-2xl border border-stone-200 bg-white p-1 shadow-sm"
-                  >
-                    <img
-                      className="h-20 w-20 rounded-xl object-cover transition hover:opacity-75"
-                      src={`examples/${image}.jpeg`}
-                      alt={image}
-                    />
-                  </div>
-                ))}
-              </div>
             </div>
           )}
         </div>
       </section>
 
       <aside className="hidden w-[320px] shrink-0 xl:block">
-        <div className="flex h-full flex-col rounded-3xl border border-stone-200 bg-white p-5 shadow-sm">
+        <div className="flex h-full flex-col rounded-3xl border border-white/10 bg-[#14181d]/92 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl">
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
               Actions
             </p>
-            <h2 className="mt-2 text-2xl font-semibold text-slate-900">
+            <h2 className="mt-2 text-2xl font-semibold text-slate-100">
               Interaction Panel
             </h2>
           </div>
 
-          <div className="mt-6 rounded-2xl border border-stone-200 bg-stone-50 p-4">
-            <p className="text-sm font-semibold text-slate-900">Tools</p>
+          <div className="mt-6 rounded-2xl border border-white/8 bg-black/20 p-4">
+            <p className="text-sm font-semibold text-slate-100">Tools</p>
             <div className="mt-4 space-y-3">
               <Slider
                 label={m.bruch_size()}
@@ -793,10 +769,8 @@ export default function Editor(props: EditorProps) {
                 )}
                 <Button
                   primary={showOriginal}
-                  className={[
-                    'w-full justify-center',
-                    toolsDisabled ? 'opacity-50 pointer-events-none' : '',
-                  ].join(' ')}
+                  className="w-full justify-center"
+                  disabled={toolsDisabled}
                   icon={<EyeIcon className="w-6 h-6" />}
                   onUp={() => {
                     setShowOriginal(!showOriginal)
@@ -807,10 +781,8 @@ export default function Editor(props: EditorProps) {
                 </Button>
                 {!showOriginal && (
                   <Button
-                    className={[
-                      'w-full justify-center',
-                      toolsDisabled ? 'opacity-50 pointer-events-none' : '',
-                    ].join(' ')}
+                    className="w-full justify-center"
+                    disabled={toolsDisabled}
                     onUp={onSuperResolution}
                   >
                     {m.upscale()}
@@ -818,32 +790,24 @@ export default function Editor(props: EditorProps) {
                 )}
                 <Button
                   primary
-                  className={[
-                    'w-full justify-center',
-                    !canApplyMask || showOriginal
-                      ? 'opacity-50 pointer-events-none'
-                      : '',
-                  ].join(' ')}
+                  className="w-full justify-center"
+                  disabled={!canApplyMask || showOriginal}
                   onClick={processMask}
                 >
                   Apply Mask
                 </Button>
                 <Button
                   primary
-                  className={[
-                    'w-full justify-center',
-                    toolsDisabled ? 'opacity-50 pointer-events-none' : '',
-                  ].join(' ')}
+                  className="w-full justify-center"
+                  disabled={toolsDisabled}
                   icon={<DownloadIcon className="w-6 h-6" />}
                   onClick={download}
                 >
                   {m.download()}
                 </Button>
                 <Button
-                  className={[
-                    'w-full justify-center',
-                    !file ? 'opacity-50 pointer-events-none' : '',
-                  ].join(' ')}
+                  className="w-full justify-center"
+                  disabled={!file}
                   onClick={onReset}
                 >
                   {m.start_new()}
@@ -852,7 +816,7 @@ export default function Editor(props: EditorProps) {
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-stone-200 bg-stone-50 p-4 text-sm text-slate-500">
+          <div className="mt-4 rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-400">
             Draw the mask in the center panel, then click Apply Mask manually to
             run the inpainting step.
           </div>
@@ -877,7 +841,7 @@ export default function Editor(props: EditorProps) {
       )}
       {showBrush && (
         <div
-          className="fixed rounded-full bg-red-500 bg-opacity-50 pointer-events-none left-0 top-0"
+          className="pointer-events-none fixed left-0 top-0 rounded-full border border-sky-300/70 bg-primary/20 shadow-[0_0_0_1px_rgba(47,140,255,0.25),0_0_24px_rgba(47,140,255,0.28)]"
           style={{
             width: `${scaledBrushSize}px`,
             height: `${scaledBrushSize}px`,

@@ -59,33 +59,28 @@ function App() {
     setShowAbout(false)
   })
 
-  async function startWithDemoImage(img: string) {
-    const imgBlob = await fetch(`/examples/${img}.jpeg`).then(r => r.blob())
-    setFile(new File([imgBlob], `${img}.jpeg`, { type: 'image/jpeg' }))
-  }
-
   async function handleFileSelection(selectedFile: File) {
     const { file: resizedFile } = await resizeImageFile(selectedFile, 1024 * 4)
     setFile(resizedFile)
   }
 
   return (
-    <div className="min-h-screen bg-stone-100 text-slate-900">
-      <header className="z-10 border-b border-stone-200 bg-white/90 backdrop-blur">
+    <div className="min-h-screen bg-transparent text-slate-100">
+      <header className="z-10 border-b border-white/10 bg-[#12161c]/86 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-[1800px] items-center justify-between px-4 sm:px-6">
           <div>
             <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
               Workspace
             </p>
-            <div className="text-2xl font-bold text-blue-600">Inpaint-web</div>
+            <div className="text-2xl font-semibold tracking-tight text-slate-100">
+              Inpaint-web
+            </div>
           </div>
 
           <div className="hidden md:flex justify-end gap-3">
             <Button
-              className={[
-                file ? '' : 'opacity-50 pointer-events-none',
-                'min-w-[148px] justify-center',
-              ].join(' ')}
+              className="min-w-[148px] justify-center"
+              disabled={!file}
               icon={<ClipboardListIcon className="w-6 h-6" />}
               onClick={() => {
                 setFile(undefined)
@@ -122,20 +117,19 @@ function App() {
         <Editor
           file={file}
           onFileSelection={handleFileSelection}
-          onStartWithDemoImage={startWithDemoImage}
           onReset={() => setFile(undefined)}
         />
       </main>
 
       {showAbout && (
         <Modal>
-          <div ref={modalRef} className="text-xl space-y-5">
+          <div ref={modalRef} className="space-y-5 text-xl text-slate-200">
             <p>
               {' '}
               任何问题到:{' '}
               <a
                 href="https://github.com/lxfater/inpaint-web"
-                style={{ color: 'blue' }}
+                className="text-sky-400"
                 rel="noreferrer"
                 target="_blank"
               >
@@ -148,7 +142,7 @@ function App() {
               For any questions, please go to:{' '}
               <a
                 href="https://github.com/lxfater/inpaint-web"
-                style={{ color: 'blue' }}
+                className="text-sky-400"
                 rel="noreferrer"
                 target="_blank"
               >
@@ -161,7 +155,7 @@ function App() {
       )}
       {!(downloadProgress === 100) && (
         <Modal>
-          <div className="text-xl space-y-5">
+          <div className="space-y-5 text-xl text-slate-100">
             <p>{m.inpaint_model_download_message()}</p>
             <Progress percent={downloadProgress} />
           </div>
@@ -169,7 +163,7 @@ function App() {
       )}
       {downloadError && (
         <Modal>
-          <div className="text-xl space-y-5">
+          <div className="space-y-5 text-xl text-slate-100">
             <p>{downloadError}</p>
             <Button onClick={() => setDownloadError(undefined)}>Close</Button>
           </div>
