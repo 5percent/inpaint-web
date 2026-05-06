@@ -19,17 +19,38 @@ import {
 
 function App() {
   const [file, setFile] = useState<File>()
-  const [stateLanguageTag, setStateLanguageTag] = useState<'en' | 'zh'>('zh')
-
-  onSetLanguageTag(() => setStateLanguageTag(languageTag()))
+  const [, setStateLanguageTag] = useState<'en' | 'zh'>('zh')
 
   const [showAbout, setShowAbout] = useState(false)
   const modalRef = useRef(null)
 
   const [downloadProgress, setDownloadProgress] = useState(100)
+  const [downloadError, setDownloadError] = useState<string>()
 
   useEffect(() => {
-    downloadModel('inpaint', setDownloadProgress)
+    onSetLanguageTag(() => setStateLanguageTag(languageTag()))
+  }, [])
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function preloadModel() {
+      try {
+        await downloadModel('inpaint', setDownloadProgress)
+      } catch (error) {
+        if (!isMounted) {
+          return
+        }
+
+        setDownloadError(error instanceof Error ? error.message : String(error))
+      }
+    }
+
+    preloadModel()
+
+    return () => {
+      isMounted = false
+    }
   }, [])
 
   useClickAway(modalRef, () => {
@@ -175,6 +196,14 @@ function App() {
           <div className="text-xl space-y-5">
             <p>{m.inpaint_model_download_message()}</p>
             <Progress percent={downloadProgress} />
+          </div>
+        </Modal>
+      )}
+      {downloadError && (
+        <Modal>
+          <div className="text-xl space-y-5">
+            <p>{downloadError}</p>
+            <Button onClick={() => setDownloadError(undefined)}>Close</Button>
           </div>
         </Modal>
       )}

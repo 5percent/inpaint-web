@@ -37,8 +37,8 @@ function imgProcess(img: Mat) {
   return chwArray // 返回转换后的数据
 }
 async function tileProc(
-  inputTensor: ort.Tensor,
-  session: ort.InferenceSession,
+  inputTensor: any,
+  session: any,
   callback: (progress: number) => void
 ) {
   const inputDims = inputTensor.dims
@@ -170,7 +170,7 @@ async function tileProc(
 function processImage(
   img: HTMLImageElement,
   canvasId?: string
-): Promise<Uint8Array> {
+): Promise<Float32Array> {
   return new Promise((resolve, reject) => {
     try {
       const src = cv.imread(img)
@@ -243,12 +243,15 @@ function imageDataToDataURL(imageData: ImageData) {
 
   // 绘制 imageData 到 canvas
   const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    throw new Error('Unable to get canvas context')
+  }
   ctx.putImageData(imageData, 0, 0)
 
   // 导出为数据 URL
   return canvas.toDataURL()
 }
-let model: ArrayBuffer | null = null
+let model: any = null
 export default async function superResolution(
   imageFile: File | HTMLImageElement,
   callback: (progress: number) => void

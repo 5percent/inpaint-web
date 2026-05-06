@@ -68,10 +68,11 @@ export default function Editor(props: EditorProps) {
   const [separatorLeft, setSeparatorLeft] = useState(0)
   const historyListRef = useRef<HTMLDivElement>(null)
   const isBrushSizeChange = useRef<boolean>(false)
-  const scaledBrushSize = useMemo(() => brushSize, [brushSize])
+  const scaledBrushSize = brushSize
   const canvasDiv = useRef<HTMLDivElement>(null)
   const [downloaded, setDownloaded] = useState(true)
   const [downloadProgress, setDownloadProgress] = useState(0)
+  const [errorMessage, setErrorMessage] = useState<string>()
   const windowSize = useWindowSize()
 
   const draw = useCallback(
@@ -83,9 +84,14 @@ export default function Editor(props: EditorProps) {
       const currRender =
         renders[index === -1 ? renders.length - 1 : index] ?? original
       const { canvas } = context
+      const canvasHost = canvasDiv.current
 
-      const divWidth = canvasDiv.current!.offsetWidth
-      const divHeight = canvasDiv.current!.offsetHeight
+      if (!canvasHost) {
+        return
+      }
+
+      const divWidth = canvasHost.offsetWidth
+      const divHeight = canvasHost.offsetHeight
 
       // 计算宽高比
       const imgAspectRatio = currRender.width / currRender.height
@@ -134,6 +140,27 @@ export default function Editor(props: EditorProps) {
     if (line) drawLines(ctx, [line], 'white')
   }, [context?.canvas.height, context?.canvas.width, lines, maskCanvas])
 
+  const onloading = useCallback(() => {
+    setIsProcessingLoading(true)
+    setGenerateProgress(0)
+    const progressTimer = window.setInterval(() => {
+      setGenerateProgress(p => {
+        if (p < 90) return p + 10 * Math.random()
+        if (p >= 90 && p < 99) return p + 1 * Math.random()
+        // Do not hide the progress bar after 99%,cause sometimes long time progress
+        // window.setTimeout(() => setIsInpaintingLoading(false), 500)
+        return p
+      })
+    }, 1000)
+    return {
+      close: () => {
+        clearInterval(progressTimer)
+        setGenerateProgress(100)
+        setIsProcessingLoading(false)
+      },
+    }
+  }, [])
+
   // Draw once the original image is loaded
   useEffect(() => {
     if (!context?.canvas) {
@@ -181,8 +208,6 @@ export default function Editor(props: EditorProps) {
       canvas.removeEventListener('mouseup', onPointerUp)
       refreshCanvasMask()
       try {
-        const start = Date.now()
-        console.log('inpaint_start')
         // each time based on the last result, the first is the original
         const newFile = renders.slice(-1)[0] ?? file
         const res = await inpaint(newFile, maskCanvas.toDataURL())
@@ -197,15 +222,8 @@ export default function Editor(props: EditorProps) {
         lines.push({ pts: [], src: '' } as Line)
         setRenders([...renders])
         setLines([...lines])
-        console.log('inpaint_processed', {
-          duration: Date.now() - start,
-        })
       } catch (e: any) {
-        console.log('inpaint_failed', {
-          error: e,
-        })
-        // eslint-disable-next-line
-        alert(e.message ? e.message : e.toString())
+        setErrorMessage(e.message ? e.message : e.toString())
       }
       if (historyListRef.current) {
         const { scrollWidth, clientWidth } = historyListRef.current
@@ -273,6 +291,8 @@ export default function Editor(props: EditorProps) {
     renders,
     showOriginal,
     hideBrushTimeout,
+    onloading,
+    scaledBrushSize,
   ])
 
   useEffect(() => {
@@ -312,10 +332,10 @@ export default function Editor(props: EditorProps) {
       separator.removeEventListener('mousedown', separatorDown)
       window.removeEventListener('mouseup', separatorUp)
     }
-  }, [separator, context])
+  }, [separator, context, originalImg])
 
   function download() {
-    const currRender = renders.at(-1) ?? original
+    const currRender = renders[renders.length - 1] ?? original
     downloadImage(currRender.currentSrc, 'IMG')
   }
 
@@ -408,7 +428,7 @@ export default function Editor(props: EditorProps) {
           </div>
         )
       }),
-    [renders, backTo]
+    [renders, backTo, draw]
   )
 
   const handleSliderStart = () => {
@@ -433,27 +453,6 @@ export default function Editor(props: EditorProps) {
     )
   }
 
-  const onloading = useCallback(() => {
-    setIsProcessingLoading(true)
-    setGenerateProgress(0)
-    const progressTimer = window.setInterval(() => {
-      setGenerateProgress(p => {
-        if (p < 90) return p + 10 * Math.random()
-        if (p >= 90 && p < 99) return p + 1 * Math.random()
-        // Do not hide the progress bar after 99%,cause sometimes long time progress
-        // window.setTimeout(() => setIsInpaintingLoading(false), 500)
-        return p
-      })
-    }, 1000)
-    return {
-      close: () => {
-        clearInterval(progressTimer)
-        setGenerateProgress(100)
-        setIsProcessingLoading(false)
-      },
-    }
-  }, [])
-
   const onSuperResolution = useCallback(async () => {
     if (!(await modelExists('superResolution'))) {
       setDownloaded(false)
@@ -463,10 +462,7 @@ export default function Editor(props: EditorProps) {
     setIsProcessingLoading(true)
     try {
       // 运行
-      const start = Date.now()
-      console.log('superResolution_start')
-      // each time based on the last result, the first is the original
-      const newFile = renders.at(-1) ?? file
+      const newFile = renders[renders.length - 1] ?? file
       const res = await superResolution(newFile, setGenerateProgress)
       if (!res) {
         throw new Error('empty response')
@@ -479,17 +475,13 @@ export default function Editor(props: EditorProps) {
       lines.push({ pts: [], src: '' } as Line)
       setRenders([...renders])
       setLines([...lines])
-      console.log('superResolution_processed', {
-        duration: Date.now() - start,
-      })
-
-      // 替换当前图片
     } catch (error) {
-      console.error('superResolution', error)
+      setErrorMessage(error instanceof Error ? error.message : String(error))
     } finally {
+      setDownloaded(true)
       setIsProcessingLoading(false)
     }
-  }, [file, lines, original.naturalHeight, original.naturalWidth, renders])
+  }, [file, lines, renders])
 
   return (
     <div
@@ -626,6 +618,14 @@ export default function Editor(props: EditorProps) {
           <div className="text-xl space-y-5">
             <p>{m.upscaleing_model_download_message()}</p>
             <Progress percent={downloadProgress} />
+          </div>
+        </Modal>
+      )}
+      {errorMessage && (
+        <Modal>
+          <div className="text-xl space-y-5">
+            <p>{errorMessage}</p>
+            <Button onClick={() => setErrorMessage(undefined)}>Close</Button>
           </div>
         </Modal>
       )}

@@ -49,9 +49,16 @@ function getModel(modelType: modelType) {
 }
 
 export async function loadModel(modelType: modelType): Promise<ArrayBuffer> {
-  const model = (await localforage.getItem(
-    getModel(modelType).name
-  )) as ArrayBuffer
+  const model = (await localforage.getItem(getModel(modelType).name)) as
+    | ArrayBuffer
+    | Uint8Array
+
+  if (model instanceof Uint8Array) {
+    const buffer = new Uint8Array(model.byteLength)
+    buffer.set(model)
+    return buffer.buffer
+  }
+
   return model
 }
 
@@ -80,20 +87,32 @@ export async function downloadModel(
   }
 
   async function downloadFromUrl(url: string) {
-    console.log('start download from', url)
     setDownloadProgress(0)
     const response = await fetch(url)
+    if (!response.ok) {
+      throw new Error(`Request failed with status ${response.status}`)
+    }
+
     const fullSize = response.headers.get('content-length')
-    const reader = response.body!.getReader()
+    const reader = response.body?.getReader()
+    if (!reader) {
+      throw new Error('Model response stream is unavailable')
+    }
+
     const total: Uint8Array[] = []
     let downloaded = 0
+    const totalSize = Number(fullSize)
+    let done = false
 
-    while (true) {
-      const { done, value } = await reader.read()
+    while (!done) {
+      const result = await reader.read()
+      done = result.done
 
       if (done) {
         break
       }
+
+      const { value } = result
 
       downloaded += value?.length || 0
 
@@ -101,7 +120,9 @@ export async function downloadModel(
         total.push(value)
       }
 
-      setDownloadProgress((downloaded / Number(fullSize)) * 100)
+      if (Number.isFinite(totalSize) && totalSize > 0) {
+        setDownloadProgress((downloaded / totalSize) * 100)
+      }
     }
 
     const buffer = new Uint8Array(downloaded)
@@ -111,21 +132,27 @@ export async function downloadModel(
       offset += chunk.length
     }
 
-    await saveModel(modelType, buffer)
+    await saveModel(modelType, buffer.buffer)
     setDownloadProgress(100)
   }
 
   const model = getModel(modelType)
   try {
     await downloadFromUrl(model.url)
-  } catch (e) {
+  } catch (error) {
     if (model.backupUrl) {
       try {
         await downloadFromUrl(model.backupUrl)
-      } catch (r) {
-        alert(`Failed to download the backup model: ${r}`)
+        return
+      } catch (backupError) {
+        throw new Error(
+          `Failed to download model from both sources. Primary: ${String(
+            error
+          )}. Backup: ${String(backupError)}`
+        )
       }
     }
-    alert(`Failed to download the model, network problem: ${e}`)
+
+    throw new Error(`Failed to download model: ${String(error)}`)
   }
 }

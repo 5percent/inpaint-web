@@ -66,7 +66,10 @@ export function useImage(
   const adjustResolution = useCallback(
     (width, height) => {
       const canvas = document.createElement('canvas')
-      const context = canvas.getContext('2d')!
+      const context = canvas.getContext('2d')
+      if (!context) {
+        return
+      }
       canvas.width = width
       canvas.height = height
       context.drawImage(image, 0, 0, width, height)

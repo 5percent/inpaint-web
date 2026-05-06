@@ -4,7 +4,6 @@
 import cv, { Mat } from 'opencv-ts'
 import { ensureModel } from './cache'
 import { getCapabilities } from './util'
-import type { modelType } from './cache'
 // ort.env.debug = true
 // ort.env.logLevel = 'verbose'
 // ort.env.webgpu.profilingMode = 'default'
@@ -142,6 +141,9 @@ function imageDataToDataURL(imageData) {
 
   // 绘制 imageData 到 canvas
   const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    throw new Error('Unable to get canvas context')
+  }
   ctx.putImageData(imageData, 0, 0)
 
   // 导出为数据 URL
@@ -162,7 +164,6 @@ function configEnv(capabilities) {
     }
     ort.env.wasm.proxy = true
   }
-  console.log('env', ort.env.wasm)
 }
 const resizeMark = (
   image: HTMLImageElement,
@@ -198,7 +199,6 @@ export default async function inpaint(
   imageFile: File | HTMLImageElement,
   maskBase64: string
 ) {
-  console.time('sessionCreate')
   if (!model) {
     const capabilities = await getCapabilities()
     configEnv(capabilities)
@@ -207,8 +207,6 @@ export default async function inpaint(
       executionProviders: [capabilities.webgpu ? 'webgpu' : 'wasm'],
     })
   }
-  console.timeEnd('sessionCreate')
-  console.time('preProcess')
 
   const [originalImg, originalMark] = await Promise.all([
     imageFile instanceof HTMLImageElement
@@ -244,14 +242,7 @@ export default async function inpaint(
     [model.inputNames[0]]: imageTensor,
     [model.inputNames[1]]: maskTensor,
   }
-
-  console.timeEnd('preProcess')
-
-  console.time('run')
   const results = await model.run(Feed)
-  console.timeEnd('run')
-
-  console.time('postProcess')
   const outsTensor = results[model.outputNames[0]]
   const chwToHwcData = postProcess(
     outsTensor.data,
@@ -263,9 +254,7 @@ export default async function inpaint(
     originalImg.width,
     originalImg.height
   )
-  console.log(imageData, 'imageData')
   const result = imageDataToDataURL(imageData)
-  console.timeEnd('postProcess')
 
   return result
 }
