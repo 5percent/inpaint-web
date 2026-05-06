@@ -1,10 +1,12 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable jsx-a11y/control-has-associated-label */
-import { ArrowLeftIcon, InformationCircleIcon } from '@heroicons/react/outline'
+import {
+  ClipboardListIcon,
+  InformationCircleIcon,
+} from '@heroicons/react/outline'
 import { useEffect, useRef, useState } from 'react'
 import { useClickAway } from 'react-use'
 import Button from './components/Button'
-import FileSelect from './components/FileSelect'
 import Modal from './components/Modal'
 import Editor from './Editor'
 import { resizeImageFile } from './utils'
@@ -62,101 +64,67 @@ function App() {
     setFile(new File([imgBlob], `${img}.jpeg`, { type: 'image/jpeg' }))
   }
 
+  async function handleFileSelection(selectedFile: File) {
+    const { file: resizedFile } = await resizeImageFile(selectedFile, 1024 * 4)
+    setFile(resizedFile)
+  }
+
   return (
-    <div className="min-h-full flex flex-col">
-      <header className="z-10 shadow flex flex-row items-center md:justify-between h-14">
-        <Button
-          className={[
-            file ? '' : 'opacity-50 pointer-events-none',
-            'pl-1 pr-1 mx-1 sm:mx-5',
-          ].join(' ')}
-          icon={<ArrowLeftIcon className="w-6 h-6" />}
-          onClick={() => {
-            setFile(undefined)
-          }}
-        >
-          <div className="md:w-[290px]">
-            <span className="hidden sm:inline select-none">
-              {m.start_new()}
-            </span>
+    <div className="min-h-screen bg-stone-100 text-slate-900">
+      <header className="z-10 border-b border-stone-200 bg-white/90 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-[1800px] items-center justify-between px-4 sm:px-6">
+          <div>
+            <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
+              Workspace
+            </p>
+            <div className="text-2xl font-bold text-blue-600">Inpaint-web</div>
           </div>
-        </Button>
-        <div className="text-4xl font-bold text-blue-600 hover:text-blue-700 transition duration-300 ease-in-out">
-          Inpaint-web
-        </div>
-        <div className="hidden md:flex justify-end w-[300px] mx-1 sm:mx-5">
-          <Button
-            className="mr-5 flex"
-            onClick={() => {
-              if (languageTag() === 'zh') {
-                setLanguageTag('en')
-              } else {
-                setLanguageTag('zh')
-              }
-            }}
-          >
-            <p>{languageTag() === 'en' ? '切换到中文' : 'en'}</p>
-          </Button>
-          <Button
-            className="w-38 flex sm:visible"
-            icon={<InformationCircleIcon className="w-6 h-6" />}
-            onClick={() => {
-              setShowAbout(true)
-            }}
-          >
-            <p>{m.feedback()}</p>
-          </Button>
+
+          <div className="hidden md:flex justify-end gap-3">
+            <Button
+              className={[
+                file ? '' : 'opacity-50 pointer-events-none',
+                'min-w-[148px] justify-center',
+              ].join(' ')}
+              icon={<ClipboardListIcon className="w-6 h-6" />}
+              onClick={() => {
+                setFile(undefined)
+              }}
+            >
+              {m.start_new()}
+            </Button>
+            <Button
+              className="flex"
+              onClick={() => {
+                if (languageTag() === 'zh') {
+                  setLanguageTag('en')
+                } else {
+                  setLanguageTag('zh')
+                }
+              }}
+            >
+              <p>{languageTag() === 'en' ? '切换到中文' : 'en'}</p>
+            </Button>
+            <Button
+              className="w-38 flex sm:visible"
+              icon={<InformationCircleIcon className="w-6 h-6" />}
+              onClick={() => {
+                setShowAbout(true)
+              }}
+            >
+              <p>{m.feedback()}</p>
+            </Button>
+          </div>
         </div>
       </header>
 
-      <main
-        style={{
-          height: 'calc(100vh - 56px)',
-        }}
-        className=" relative"
-      >
-        {file ? (
-          <Editor file={file} />
-        ) : (
-          <>
-            <div className="flex h-full flex-1 flex-col items-center justify-center overflow-hidden">
-              <div className="h-72 sm:w-1/2 max-w-5xl">
-                <FileSelect
-                  onSelection={async f => {
-                    const { file: resizedFile } = await resizeImageFile(
-                      f,
-                      1024 * 4
-                    )
-                    setFile(resizedFile)
-                  }}
-                />
-              </div>
-              <div className="flex flex-col sm:flex-row pt-10 items-center justify-center cursor-pointer">
-                <span className="text-gray-500">{m.try_it_images()}</span>
-                <div className="flex space-x-2 sm:space-x-4 px-4">
-                  {['bag', 'dog', 'car', 'bird', 'jacket', 'shoe', 'paris'].map(
-                    image => (
-                      <div
-                        key={image}
-                        onClick={() => startWithDemoImage(image)}
-                        role="button"
-                        onKeyDown={() => startWithDemoImage(image)}
-                        tabIndex={-1}
-                      >
-                        <img
-                          className="rounded-md hover:opacity-75 w-auto h-25"
-                          src={`examples/${image}.jpeg`}
-                          alt={image}
-                          style={{ height: '100px' }}
-                        />
-                      </div>
-                    )
-                  )}
-                </div>
-              </div>
-            </div>
-          </>
-        )}
+      <main className="mx-auto flex min-h-[calc(100vh-64px)] w-full max-w-[1800px] gap-4 px-4 py-4 sm:px-6">
+        <Editor
+          file={file}
+          onFileSelection={handleFileSelection}
+          onStartWithDemoImage={startWithDemoImage}
+          onReset={() => setFile(undefined)}
+        />
       </main>
 
       {showAbout && (

@@ -57,7 +57,7 @@ export function loadImage(image: HTMLImageElement, src: string) {
 }
 
 export function useImage(
-  file: Blob | MediaSource
+  file?: Blob | MediaSource
 ): [HTMLImageElement, boolean, (width: number, height: number) => void] {
   const [image, setImage] = useState(new Image())
   const [isLoaded, setIsLoaded] = useState(false)
@@ -81,6 +81,12 @@ export function useImage(
   )
 
   useEffect(() => {
+    if (!file) {
+      setImage(new Image())
+      setIsLoaded(false)
+      return undefined
+    }
+
     const newImage = new Image()
     newImage.onload = () => {
       setIsLoaded(true)

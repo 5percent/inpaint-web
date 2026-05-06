@@ -6,6 +6,7 @@ import { useWindowSize } from 'react-use'
 import inpaint from './adapters/inpainting'
 import superResolution from './adapters/superResolution'
 import Button from './components/Button'
+import FileSelect from './components/FileSelect'
 import Slider from './components/Slider'
 import { downloadImage, loadImage, useImage } from './utils'
 import Progress from './components/Progress'
@@ -14,13 +15,15 @@ import Modal from './components/Modal'
 import * as m from './paraglide/messages'
 
 interface EditorProps {
-  file: File
+  file?: File
+  onFileSelection: (file: File) => void | Promise<void>
+  onStartWithDemoImage: (image: string) => void | Promise<void>
+  onReset: () => void
 }
 
 interface Line {
   size?: number
   pts: { x: number; y: number }[]
-  src: string
 }
 
 function drawLines(
@@ -46,7 +49,7 @@ function drawLines(
 
 const BRUSH_HIDE_ON_SLIDER_CHANGE_TIMEOUT = 2000
 export default function Editor(props: EditorProps) {
-  const { file } = props
+  const { file, onFileSelection, onStartWithDemoImage, onReset } = props
   const [brushSize, setBrushSize] = useState(40)
   const [original, isOriginalLoaded] = useImage(file)
   const [renders, setRenders] = useState<HTMLImageElement[]>([])
@@ -54,7 +57,7 @@ export default function Editor(props: EditorProps) {
   const [maskCanvas] = useState<HTMLCanvasElement>(() => {
     return document.createElement('canvas')
   })
-  const [lines, setLines] = useState<Line[]>([{ pts: [], src: '' }])
+  const [pendingLines, setPendingLines] = useState<Line[]>([])
   const brushRef = useRef<HTMLDivElement>(null)
   const [showBrush, setShowBrush] = useState(false)
   const [hideBrushTimeout, setHideBrushTimeout] = useState(0)
@@ -74,6 +77,11 @@ export default function Editor(props: EditorProps) {
   const [downloadProgress, setDownloadProgress] = useState(0)
   const [errorMessage, setErrorMessage] = useState<string>()
   const windowSize = useWindowSize()
+  const demoImages = ['bag', 'dog', 'car', 'bird', 'jacket', 'shoe', 'paris']
+  const toolsDisabled = !file || isInpaintingLoading
+  const canApplyMask = Boolean(
+    file && pendingLines.some(line => line.pts.length)
+  )
 
   const draw = useCallback(
     (index = -1) => {
@@ -119,10 +127,9 @@ export default function Editor(props: EditorProps) {
       } else {
         context.drawImage(original, 0, 0, canvas.width, canvas.height)
       }
-      const currentLine = lines[lines.length - 1]
-      drawLines(context, [currentLine])
+      drawLines(context, pendingLines)
     },
-    [context, lines, original, renders]
+    [context, original, pendingLines, renders]
   )
 
   const refreshCanvasMask = useCallback(() => {
@@ -135,10 +142,9 @@ export default function Editor(props: EditorProps) {
     if (!ctx) {
       throw new Error('could not retrieve mask canvas')
     }
-    // Just need the finishing touch
-    const line = lines.slice(-1)[0]
-    if (line) drawLines(ctx, [line], 'white')
-  }, [context?.canvas.height, context?.canvas.width, lines, maskCanvas])
+    ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height)
+    drawLines(ctx, pendingLines, 'white')
+  }, [context?.canvas.height, context?.canvas.width, maskCanvas, pendingLines])
 
   const onloading = useCallback(() => {
     setIsProcessingLoading(true)
@@ -161,6 +167,49 @@ export default function Editor(props: EditorProps) {
     }
   }, [])
 
+  const processMask = useCallback(async () => {
+    if (!file || !context || !canApplyMask || showOriginal) {
+      return
+    }
+
+    const loading = onloading()
+    refreshCanvasMask()
+
+    try {
+      const newFile = renders[renders.length - 1] ?? file
+      const res = await inpaint(newFile, maskCanvas.toDataURL())
+      if (!res) {
+        throw new Error('empty response')
+      }
+
+      const newRender = new Image()
+      newRender.dataset.id = Date.now().toString()
+      await loadImage(newRender, res)
+      setRenders(currentRenders => [...currentRenders, newRender])
+      setPendingLines([])
+    } catch (e: any) {
+      setErrorMessage(e.message ? e.message : e.toString())
+    }
+
+    if (historyListRef.current) {
+      const { scrollWidth, clientWidth } = historyListRef.current
+      if (scrollWidth > clientWidth) {
+        historyListRef.current.scrollTo(scrollWidth, 0)
+      }
+    }
+
+    loading.close()
+  }, [
+    canApplyMask,
+    context,
+    file,
+    maskCanvas,
+    onloading,
+    refreshCanvasMask,
+    renders,
+    showOriginal,
+  ])
+
   // Draw once the original image is loaded
   useEffect(() => {
     if (!context?.canvas) {
@@ -171,6 +220,15 @@ export default function Editor(props: EditorProps) {
     }
   }, [context?.canvas, draw, original, isOriginalLoaded, windowSize])
 
+  useEffect(() => {
+    if (!file) {
+      setRenders([])
+      setPendingLines([])
+      setShowOriginal(false)
+      setSeparatorLeft(0)
+    }
+  }, [file])
+
   // Handle mouse interactions
   useEffect(() => {
     const canvas = context?.canvas
@@ -179,83 +237,59 @@ export default function Editor(props: EditorProps) {
     }
     const onMouseMove = (ev: MouseEvent) => {
       if (brushRef.current) {
-        const x = ev.pageX - scaledBrushSize / 2
-        const y = ev.pageY - scaledBrushSize / 2
+        const x = ev.clientX - scaledBrushSize / 2
+        const y = ev.clientY - scaledBrushSize / 2
 
         brushRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`
       }
     }
     const onPaint = (px: number, py: number) => {
-      const currLine = lines[lines.length - 1]
-      currLine.pts.push({ x: px, y: py })
-      draw()
+      setPendingLines(currentLines => {
+        if (!currentLines.length) {
+          return currentLines
+        }
+
+        const nextLines = [...currentLines]
+        const currentLine = nextLines[nextLines.length - 1]
+        nextLines[nextLines.length - 1] = {
+          ...currentLine,
+          pts: [...currentLine.pts, { x: px, y: py }],
+        }
+        return nextLines
+      })
     }
     const onMouseDrag = (ev: MouseEvent) => {
-      const px = ev.offsetX - canvas.offsetLeft
-      const py = ev.offsetY - canvas.offsetTop
+      const rect = canvas.getBoundingClientRect()
+      const px = ev.clientX - rect.left
+      const py = ev.clientY - rect.top
       onPaint(px, py)
     }
 
-    const onPointerUp = async () => {
-      if (!original.src || showOriginal) {
-        return
-      }
-      if (lines.slice(-1)[0]?.pts.length === 0) {
-        return
-      }
-      const loading = onloading()
+    const onPointerUp = () => {
       canvas.removeEventListener('mousemove', onMouseDrag)
       canvas.removeEventListener('mouseup', onPointerUp)
-      refreshCanvasMask()
-      try {
-        // each time based on the last result, the first is the original
-        const newFile = renders.slice(-1)[0] ?? file
-        const res = await inpaint(newFile, maskCanvas.toDataURL())
-        if (!res) {
-          throw new Error('empty response')
-        }
-        // TODO: fix the render if it failed loading
-        const newRender = new Image()
-        newRender.dataset.id = Date.now().toString()
-        await loadImage(newRender, res)
-        renders.push(newRender)
-        lines.push({ pts: [], src: '' } as Line)
-        setRenders([...renders])
-        setLines([...lines])
-      } catch (e: any) {
-        setErrorMessage(e.message ? e.message : e.toString())
-      }
-      if (historyListRef.current) {
-        const { scrollWidth, clientWidth } = historyListRef.current
-        if (scrollWidth > clientWidth) {
-          historyListRef.current.scrollTo(scrollWidth, 0)
-        }
-      }
-      loading.close()
-      draw()
     }
     canvas.addEventListener('mousemove', onMouseMove)
 
     const onTouchMove = (ev: TouchEvent) => {
       ev.preventDefault()
       ev.stopPropagation()
-      const currLine = lines[lines.length - 1]
       const coords = canvas.getBoundingClientRect()
-      currLine.pts.push({
-        x: ev.touches[0].clientX - coords.x,
-        y: ev.touches[0].clientY - coords.y,
-      })
-      draw()
+      onPaint(
+        ev.touches[0].clientX - coords.left,
+        ev.touches[0].clientY - coords.top
+      )
     }
     const onPointerStart = () => {
       if (!original.src || showOriginal) {
         return
       }
-      const currLine = lines[lines.length - 1]
-      currLine.size = brushSize
+      setPendingLines(currentLines => [
+        ...currentLines,
+        { size: brushSize, pts: [] },
+      ])
       canvas.addEventListener('mousemove', onMouseDrag)
       canvas.addEventListener('mouseup', onPointerUp)
-      // onPaint(e)
     }
 
     canvas.addEventListener('touchstart', onPointerStart)
@@ -282,16 +316,9 @@ export default function Editor(props: EditorProps) {
   }, [
     brushSize,
     context,
-    file,
-    draw,
-    lines,
-    refreshCanvasMask,
-    maskCanvas,
     original.src,
-    renders,
     showOriginal,
     hideBrushTimeout,
-    onloading,
     scaledBrushSize,
   ])
 
@@ -340,14 +367,15 @@ export default function Editor(props: EditorProps) {
   }
 
   const undo = useCallback(async () => {
-    const l = lines
-    l.pop()
-    l.pop()
-    setLines([...l, { pts: [], src: '' }])
-    const r = renders
-    r.pop()
-    setRenders([...r])
-  }, [lines, renders])
+    if (pendingLines.length) {
+      setPendingLines(currentLines => currentLines.slice(0, -1))
+      return
+    }
+
+    setRenders(currentRenders => currentRenders.slice(0, -1))
+    setShowOriginal(false)
+    setSeparatorLeft(0)
+  }, [pendingLines.length])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -368,36 +396,81 @@ export default function Editor(props: EditorProps) {
 
   const backTo = useCallback(
     (index: number) => {
-      lines.splice(index + 1)
-      setLines([...lines, { pts: [], src: '' }])
-      renders.splice(index + 1)
-      setRenders([...renders])
+      setRenders(currentRenders => currentRenders.slice(0, Math.max(index, 0)))
+      setPendingLines([])
+      setShowOriginal(false)
+      setSeparatorLeft(0)
+      window.requestAnimationFrame(() => {
+        if (index === 0) {
+          draw(renders.length)
+          return
+        }
+
+        draw(index - 1)
+      })
     },
-    [renders, lines]
+    [draw, renders.length]
   )
+
+  const previewHistoryItem = useCallback(
+    (historyIndex: number) => {
+      if (historyIndex === 0) {
+        draw(renders.length)
+        return
+      }
+
+      draw(historyIndex - 1)
+    },
+    [draw, renders.length]
+  )
+
+  const historyItems = useMemo(() => {
+    if (!file || !isOriginalLoaded || !original.src) {
+      return [] as Array<{
+        id: string
+        image: HTMLImageElement
+        historyIndex: number
+        isOriginal: boolean
+      }>
+    }
+
+    return [
+      {
+        id: 'original-preview',
+        image: original,
+        historyIndex: 0,
+        isOriginal: true,
+      },
+      ...renders.map((render, index) => ({
+        id: render.dataset.id ?? `render-${index}`,
+        image: render,
+        historyIndex: index + 1,
+        isOriginal: false,
+      })),
+    ]
+  }, [file, isOriginalLoaded, original, renders])
 
   const History = useMemo(
     () =>
-      renders.map((render, index) => {
+      historyItems.map(item => {
         return (
           <div
-            key={render.dataset.id}
-            style={{
-              position: 'relative',
-              display: 'inline-block',
-              flexShrink: 0,
-            }}
+            key={item.id}
+            className="relative flex h-[104px] w-full shrink-0 items-center justify-center rounded-2xl border border-stone-200 bg-white p-2"
           >
             <img
-              src={render.src}
+              src={item.image.src}
               alt="render"
-              className="rounded-sm"
+              className="max-h-full max-w-full rounded-sm object-contain"
               style={{
                 height: '90px',
               }}
             />
             <Button
-              className="hover:opacity-100 opacity-0 cursor-pointer rounded-sm"
+              className={[
+                'cursor-pointer rounded-sm',
+                item.isOriginal ? 'opacity-100' : 'hover:opacity-100 opacity-0',
+              ].join(' ')}
               style={{
                 position: 'absolute',
                 top: '0',
@@ -409,8 +482,8 @@ export default function Editor(props: EditorProps) {
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
-              onClick={() => backTo(index)}
-              onEnter={() => draw(index)}
+              onClick={() => backTo(item.historyIndex)}
+              onEnter={() => previewHistoryItem(item.historyIndex)}
               onLeave={draw}
             >
               <div
@@ -420,15 +493,15 @@ export default function Editor(props: EditorProps) {
                   textAlign: 'center',
                 }}
               >
-                回到这
+                {item.isOriginal ? '原图' : '回到这'}
                 <br />
-                Back here
+                {item.isOriginal ? 'Original' : 'Back here'}
               </div>
             </Button>
           </div>
         )
       }),
-    [renders, backTo, draw]
+    [historyItems, backTo, previewHistoryItem, draw]
   )
 
   const handleSliderStart = () => {
@@ -454,6 +527,10 @@ export default function Editor(props: EditorProps) {
   }
 
   const onSuperResolution = useCallback(async () => {
+    if (!file) {
+      return
+    }
+
     if (!(await modelExists('superResolution'))) {
       setDownloaded(false)
       await downloadModel('superResolution', setDownloadProgress)
@@ -471,147 +548,316 @@ export default function Editor(props: EditorProps) {
       const newRender = new Image()
       newRender.dataset.id = Date.now().toString()
       await loadImage(newRender, res)
-      renders.push(newRender)
-      lines.push({ pts: [], src: '' } as Line)
-      setRenders([...renders])
-      setLines([...lines])
+      setRenders(currentRenders => [...currentRenders, newRender])
+      setPendingLines([])
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error))
     } finally {
       setDownloaded(true)
       setIsProcessingLoading(false)
     }
-  }, [file, lines, renders])
+  }, [file, renders])
 
   return (
-    <div
-      className={[
-        'flex flex-col items-center h-full justify-between',
-        isInpaintingLoading ? 'animate-pulse-fast pointer-events-none' : '',
-      ].join(' ')}
-    >
-      {/* History */}
-      <div
-        ref={historyListRef}
-        style={{
-          height: '116px',
-        }}
-        className={[
-          'flex-shrink-0',
-          'mt-4 border p-3 rounded',
-          'flex items-left w-full max-w-4xl',
-          'space-y-0 flex-row space-x-5',
-          'scrollbar-thin scrollbar-thumb-black scrollbar-track-primary overflow-x-scroll',
-        ].join(' ')}
-      >
-        {History}
-      </div>
-      {/* 画图 */}
-      <div
-        className={[
-          'flex-grow',
-          'flex justify-center',
-          'my-2',
-          'relative',
-        ].join(' ')}
-        style={{
-          width: '70vw',
-        }}
-        ref={canvasDiv}
-      >
-        <div className="relative">
-          <canvas
-            className="rounded-sm"
-            style={showBrush ? { cursor: 'none' } : {}}
-            ref={r => {
-              if (r && !context) {
-                const ctx = r.getContext('2d')
-                if (ctx) {
-                  setContext(ctx)
-                }
-              }
-            }}
-          />
-          <div
-            className={[
-              'absolute top-0 right-0 pointer-events-none',
-              showOriginal ? '' : 'overflow-hidden',
-            ].join(' ')}
-            style={{
-              width: showOriginal ? `${context?.canvas.width}px` : '0px',
-              height: context?.canvas.height,
-              transitionProperty: 'width, height',
-              transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-              transitionDuration: '300ms',
-            }}
-            ref={r => {
-              if (r && !originalImg) {
-                setOriginalImg(r)
-              }
-            }}
-          >
-            <div
-              className={[
-                'absolute top-0 right-0 pointer-events-none z-10',
-                useSeparator ? 'bg-black text-white' : 'bg-primary ',
-                'w-1',
-                'flex items-center justify-center',
-                'separator',
-              ].join(' ')}
-              style={{
-                left: `${separatorLeft}px`,
-                height: context?.canvas.height,
-                transitionProperty: 'width, height',
-                transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-                transitionDuration: '300ms',
-              }}
-            >
-              <span className="absolute left-1 bottom-0 p-1 bg-opacity-25 bg-black rounded text-white select-none">
-                original
-              </span>
-              <div
-                className={[
-                  'absolute py-2 px-1 rounded-md pointer-events-auto',
-                  useSeparator ? 'bg-black' : 'bg-primary ',
-                ].join(' ')}
-                style={{ cursor: 'ew-resize' }}
-                ref={r => {
-                  if (r && !separator) {
-                    setSeparator(r)
-                  }
-                }}
-              >
-                <ViewBoardsIcon
-                  className="w-5 h-5"
-                  style={{ cursor: 'ew-resize' }}
-                />
-              </div>
-            </div>
-            <img
-              className="absolute right-0"
-              src={original.src}
-              alt="original"
-              width={`${context?.canvas.width}px`}
-              height={`${context?.canvas.height}px`}
-              style={{
-                width: `${context?.canvas.width}px`,
-                height: `${context?.canvas.height}px`,
-                maxWidth: 'none',
-                clipPath: `inset(0 0 0 ${separatorLeft}px)`,
-              }}
-            />
+    <div className="flex min-w-0 flex-1 gap-4">
+      <aside className="hidden w-[280px] shrink-0 lg:block">
+        <div className="flex h-full flex-col rounded-3xl border border-stone-200 bg-white p-5 shadow-sm">
+          <div>
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+              History
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-900">
+              Image Timeline
+            </h2>
+            <p className="mt-2 text-sm text-slate-500">
+              This workspace only handles one image at a time. The original
+              image stays pinned at the top and each processed result is
+              appended below it.
+            </p>
           </div>
-          {isInpaintingLoading && (
-            <div className="z-10 bg-white absolute bg-opacity-80 top-0 left-0 right-0 bottom-0  h-full w-full flex justify-center items-center">
-              <div ref={modalRef} className="text-xl space-y-5 w-4/5 sm:w-1/2">
-                <p>正在处理中，请耐心等待。。。</p>
-                <p>It is being processed, please be patient...</p>
-                <Progress percent={generateProgress} />
+
+          <div
+            ref={historyListRef}
+            className={[
+              'mt-6 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-2xl border border-stone-200 bg-stone-50 p-3',
+              'scrollbar-thin scrollbar-thumb-black scrollbar-track-primary',
+            ].join(' ')}
+          >
+            {historyItems.length > 0 ? (
+              History
+            ) : (
+              <div className="flex h-full items-center text-sm text-slate-500">
+                History previews will appear here after you load an image and
+                run edits.
+              </div>
+            )}
+          </div>
+        </div>
+      </aside>
+
+      <section
+        className={[
+          'flex min-w-0 flex-1 flex-col rounded-3xl border border-stone-200 bg-white p-4 shadow-sm',
+          isInpaintingLoading ? 'animate-pulse-fast pointer-events-none' : '',
+        ].join(' ')}
+      >
+        <div
+          className="relative flex min-h-0 flex-1 justify-center"
+          ref={canvasDiv}
+        >
+          {file ? (
+            <div className="relative flex w-full items-center justify-center overflow-hidden rounded-2xl border border-stone-200 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.95),_rgba(241,245,249,0.92)_45%,_rgba(226,232,240,0.85))] p-6">
+              <div className="relative flex max-h-full max-w-full items-center justify-center rounded-[28px] bg-white/90 p-3 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur-sm">
+                <canvas
+                  className="rounded-xl"
+                  style={showBrush ? { cursor: 'none' } : {}}
+                  ref={r => {
+                    if (r && !context) {
+                      const ctx = r.getContext('2d')
+                      if (ctx) {
+                        setContext(ctx)
+                      }
+                    }
+                  }}
+                />
+                <div
+                  className={[
+                    'absolute top-3 right-3 pointer-events-none',
+                    showOriginal ? '' : 'overflow-hidden',
+                  ].join(' ')}
+                  style={{
+                    width: showOriginal ? `${context?.canvas.width}px` : '0px',
+                    height: context?.canvas.height,
+                    transitionProperty: 'width, height',
+                    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+                    transitionDuration: '300ms',
+                  }}
+                  ref={r => {
+                    if (r && !originalImg) {
+                      setOriginalImg(r)
+                    }
+                  }}
+                >
+                  <div
+                    className={[
+                      'absolute top-0 right-0 pointer-events-none z-10 w-1',
+                      'flex items-center justify-center separator',
+                      useSeparator ? 'bg-black text-white' : 'bg-primary ',
+                    ].join(' ')}
+                    style={{
+                      left: `${separatorLeft}px`,
+                      height: context?.canvas.height,
+                      transitionProperty: 'width, height',
+                      transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+                      transitionDuration: '300ms',
+                    }}
+                  >
+                    <span className="absolute left-1 bottom-0 rounded bg-black bg-opacity-25 p-1 text-white select-none">
+                      original
+                    </span>
+                    <div
+                      className={[
+                        'absolute pointer-events-auto rounded-md px-1 py-2',
+                        useSeparator ? 'bg-black' : 'bg-primary ',
+                      ].join(' ')}
+                      style={{ cursor: 'ew-resize' }}
+                      ref={r => {
+                        if (r && !separator) {
+                          setSeparator(r)
+                        }
+                      }}
+                    >
+                      <ViewBoardsIcon
+                        className="w-5 h-5"
+                        style={{ cursor: 'ew-resize' }}
+                      />
+                    </div>
+                  </div>
+                  <img
+                    className="absolute right-0 rounded-xl"
+                    src={original.src}
+                    alt="original"
+                    width={`${context?.canvas.width}px`}
+                    height={`${context?.canvas.height}px`}
+                    style={{
+                      width: `${context?.canvas.width}px`,
+                      height: `${context?.canvas.height}px`,
+                      maxWidth: 'none',
+                      clipPath: `inset(0 0 0 ${separatorLeft}px)`,
+                    }}
+                  />
+                </div>
+              </div>
+              {isInpaintingLoading && (
+                <div className="absolute inset-0 z-10 flex h-full w-full items-center justify-center bg-white bg-opacity-80">
+                  <div
+                    ref={modalRef}
+                    className="w-4/5 space-y-5 text-xl sm:w-1/2"
+                  >
+                    <p>正在处理中，请耐心等待。。。</p>
+                    <p>It is being processed, please be patient...</p>
+                    <Progress percent={generateProgress} />
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex w-full flex-col items-center justify-center rounded-2xl border border-dashed border-stone-300 bg-stone-50 px-6 py-10 text-center">
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+                Display
+              </p>
+              <h2 className="mt-3 text-3xl font-semibold text-slate-900">
+                Upload an image to start editing
+              </h2>
+              <p className="mt-3 max-w-2xl text-sm text-slate-500">
+                The center panel is used for previewing the image, drawing masks
+                on the canvas and checking processing history.
+              </p>
+
+              <div className="mt-8 h-72 w-full max-w-3xl">
+                <FileSelect onSelection={onFileSelection} />
+              </div>
+
+              <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+                <span className="text-sm text-slate-500">
+                  {m.try_it_images()}
+                </span>
+                {demoImages.map(image => (
+                  <div
+                    key={image}
+                    onClick={() => onStartWithDemoImage(image)}
+                    role="button"
+                    onKeyDown={() => onStartWithDemoImage(image)}
+                    tabIndex={-1}
+                    className="overflow-hidden rounded-2xl border border-stone-200 bg-white p-1 shadow-sm"
+                  >
+                    <img
+                      className="h-20 w-20 rounded-xl object-cover transition hover:opacity-75"
+                      src={`examples/${image}.jpeg`}
+                      alt={image}
+                    />
+                  </div>
+                ))}
               </div>
             </div>
           )}
         </div>
-      </div>
+      </section>
+
+      <aside className="hidden w-[320px] shrink-0 xl:block">
+        <div className="flex h-full flex-col rounded-3xl border border-stone-200 bg-white p-5 shadow-sm">
+          <div>
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+              Actions
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-900">
+              Interaction Panel
+            </h2>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-stone-200 bg-stone-50 p-4">
+            <p className="text-sm font-semibold text-slate-900">Tools</p>
+            <div className="mt-4 space-y-3">
+              <Slider
+                label={m.bruch_size()}
+                min={10}
+                max={200}
+                value={brushSize}
+                onChange={handleSliderChange}
+                onStart={handleSliderStart}
+              />
+              <div className="space-y-2">
+                {renders.length > 0 && (
+                  <Button
+                    primary
+                    className="w-full justify-center"
+                    onClick={undo}
+                    icon={
+                      <svg
+                        className="w-6 h-6"
+                        width="19"
+                        height="9"
+                        viewBox="0 0 19 9"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          d="M2 1C2 0.447715 1.55228 0 1 0C0.447715 0 0 0.447715 0 1H2ZM1 8H0V9H1V8ZM8 9C8.55228 9 9 8.55229 9 8C9 7.44771 8.55228 7 8 7V9ZM16.5963 7.42809C16.8327 7.92721 17.429 8.14016 17.9281 7.90374C18.4272 7.66731 18.6402 7.07103 18.4037 6.57191L16.5963 7.42809ZM16.9468 5.83205L17.8505 5.40396L16.9468 5.83205ZM0 1V8H2V1H0ZM1 9H8V7H1V9ZM1.66896 8.74329L6.66896 4.24329L5.33104 2.75671L0.331035 7.25671L1.66896 8.74329ZM16.043 6.26014L16.5963 7.42809L18.4037 6.57191L17.8505 5.40396L16.043 6.26014ZM6.65079 4.25926C9.67554 1.66661 14.3376 2.65979 16.043 6.26014L17.8505 5.40396C15.5805 0.61182 9.37523 -0.710131 5.34921 2.74074L6.65079 4.25926Z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                    }
+                  >
+                    {m.undo()}
+                  </Button>
+                )}
+                <Button
+                  primary={showOriginal}
+                  className={[
+                    'w-full justify-center',
+                    toolsDisabled ? 'opacity-50 pointer-events-none' : '',
+                  ].join(' ')}
+                  icon={<EyeIcon className="w-6 h-6" />}
+                  onUp={() => {
+                    setShowOriginal(!showOriginal)
+                    setTimeout(() => setSeparatorLeft(0), 300)
+                  }}
+                >
+                  {m.original()}
+                </Button>
+                {!showOriginal && (
+                  <Button
+                    className={[
+                      'w-full justify-center',
+                      toolsDisabled ? 'opacity-50 pointer-events-none' : '',
+                    ].join(' ')}
+                    onUp={onSuperResolution}
+                  >
+                    {m.upscale()}
+                  </Button>
+                )}
+                <Button
+                  primary
+                  className={[
+                    'w-full justify-center',
+                    !canApplyMask || showOriginal
+                      ? 'opacity-50 pointer-events-none'
+                      : '',
+                  ].join(' ')}
+                  onClick={processMask}
+                >
+                  Apply Mask
+                </Button>
+                <Button
+                  primary
+                  className={[
+                    'w-full justify-center',
+                    toolsDisabled ? 'opacity-50 pointer-events-none' : '',
+                  ].join(' ')}
+                  icon={<DownloadIcon className="w-6 h-6" />}
+                  onClick={download}
+                >
+                  {m.download()}
+                </Button>
+                <Button
+                  className={[
+                    'w-full justify-center',
+                    !file ? 'opacity-50 pointer-events-none' : '',
+                  ].join(' ')}
+                  onClick={onReset}
+                >
+                  {m.start_new()}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-stone-200 bg-stone-50 p-4 text-sm text-slate-500">
+            Draw the mask in the center panel, then click Apply Mask manually to
+            run the inpainting step.
+          </div>
+        </div>
+      </aside>
 
       {!downloaded && (
         <Modal>
@@ -640,68 +886,6 @@ export default function Editor(props: EditorProps) {
           ref={brushRef}
         />
       )}
-      {/* 工具栏 */}
-      <div
-        className={[
-          'flex-shrink-0',
-          'bg-white rounded-md border border-gray-300 hover:border-gray-400 shadow-md hover:shadow-lg p-4 transition duration-200 ease-in-out',
-          'flex items-center w-full max-w-4xl py-6 mb-4, justify-between',
-          'flex-col space-y-2 sm:space-y-0 sm:flex-row sm:space-x-5',
-        ].join(' ')}
-      >
-        {renders.length > 0 && (
-          <Button
-            primary
-            onClick={undo}
-            icon={
-              <svg
-                className="w-6 h-6"
-                width="19"
-                height="9"
-                viewBox="0 0 19 9"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M2 1C2 0.447715 1.55228 0 1 0C0.447715 0 0 0.447715 0 1H2ZM1 8H0V9H1V8ZM8 9C8.55228 9 9 8.55229 9 8C9 7.44771 8.55228 7 8 7V9ZM16.5963 7.42809C16.8327 7.92721 17.429 8.14016 17.9281 7.90374C18.4272 7.66731 18.6402 7.07103 18.4037 6.57191L16.5963 7.42809ZM16.9468 5.83205L17.8505 5.40396L16.9468 5.83205ZM0 1V8H2V1H0ZM1 9H8V7H1V9ZM1.66896 8.74329L6.66896 4.24329L5.33104 2.75671L0.331035 7.25671L1.66896 8.74329ZM16.043 6.26014L16.5963 7.42809L18.4037 6.57191L17.8505 5.40396L16.043 6.26014ZM6.65079 4.25926C9.67554 1.66661 14.3376 2.65979 16.043 6.26014L17.8505 5.40396C15.5805 0.61182 9.37523 -0.710131 5.34921 2.74074L6.65079 4.25926Z"
-                  fill="currentColor"
-                />
-              </svg>
-            }
-          >
-            {m.undo()}
-          </Button>
-        )}
-        <Slider
-          label={m.bruch_size()}
-          min={10}
-          max={200}
-          value={brushSize}
-          onChange={handleSliderChange}
-          onStart={handleSliderStart}
-        />
-        <Button
-          primary={showOriginal}
-          icon={<EyeIcon className="w-6 h-6" />}
-          onUp={() => {
-            setShowOriginal(!showOriginal)
-            setTimeout(() => setSeparatorLeft(0), 300)
-          }}
-        >
-          {m.original()}
-        </Button>
-        {!showOriginal && (
-          <Button onUp={onSuperResolution}>{m.upscale()}</Button>
-        )}
-
-        <Button
-          primary
-          icon={<DownloadIcon className="w-6 h-6" />}
-          onClick={download}
-        >
-          {m.download()}
-        </Button>
-      </div>
     </div>
   )
 }
