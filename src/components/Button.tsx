@@ -6,6 +6,7 @@ interface ButtonProps {
   icon?: ReactNode
   primary?: boolean
   disabled?: boolean
+  iconOnly?: boolean
   style?: {
     [key: string]: string
   }
@@ -23,6 +24,7 @@ export default function Button(props: ButtonProps) {
     icon,
     primary,
     disabled,
+    iconOnly,
     style,
     onClick,
     onDown,
@@ -91,7 +93,9 @@ export default function Button(props: ButtonProps) {
       }}
       tabIndex={-1}
       className={[
-        'inline-flex space-x-3 rounded-xl border px-5 py-3',
+        'inline-flex items-center justify-center rounded-xl border py-3',
+        iconOnly ? 'h-12 w-12 px-0' : 'px-5',
+        icon && !iconOnly ? 'space-x-3' : '',
         'transition duration-150 ease-out select-none',
         disabled ? 'cursor-not-allowed' : 'cursor-pointer',
         background,
@@ -100,7 +104,9 @@ export default function Button(props: ButtonProps) {
       style={style}
     >
       {icon}
-      <span className="whitespace-nowrap select-none">{children}</span>
+      <span className={iconOnly ? 'sr-only' : 'whitespace-nowrap select-none'}>
+        {children}
+      </span>
     </div>
   )
 }

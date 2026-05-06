@@ -1,6 +1,6 @@
 /* eslint-disable jsx-a11y/click-events-have-key-events */
 /* eslint-disable jsx-a11y/no-static-element-interactions */
-import { DownloadIcon, EyeIcon, ViewBoardsIcon } from '@heroicons/react/outline'
+import { ViewBoardsIcon } from '@heroicons/react/outline'
 import { useCallback, useEffect, useState, useRef, useMemo } from 'react'
 import { useWindowSize } from 'react-use'
 import inpaint from './adapters/inpainting'
@@ -20,9 +20,12 @@ interface EditorProps {
   onReset: () => void
 }
 
+type ToolMode = 'brush' | 'eraser'
+
 interface Line {
   size?: number
   pts: { x: number; y: number }[]
+  mode: ToolMode
 }
 
 function drawLines(
@@ -38,11 +41,19 @@ function drawLines(
     if (!line?.pts.length || !line.size) {
       return
     }
+    ctx.save()
+    if (line.mode === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out'
+      ctx.strokeStyle = 'rgba(0, 0, 0, 1)'
+    } else {
+      ctx.strokeStyle = color
+    }
     ctx.lineWidth = line.size
     ctx.beginPath()
     ctx.moveTo(line.pts[0].x, line.pts[0].y)
     line.pts.forEach(pt => ctx.lineTo(pt.x, pt.y))
     ctx.stroke()
+    ctx.restore()
   })
 }
 
@@ -57,6 +68,9 @@ export default function Editor(props: EditorProps) {
     return document.createElement('canvas')
   })
   const [pendingLines, setPendingLines] = useState<Line[]>([])
+  const [redoRenders, setRedoRenders] = useState<HTMLImageElement[]>([])
+  const [redoPendingLines, setRedoPendingLines] = useState<Line[]>([])
+  const [toolMode, setToolMode] = useState<ToolMode>('brush')
   const brushRef = useRef<HTMLDivElement>(null)
   const [showBrush, setShowBrush] = useState(false)
   const [hideBrushTimeout, setHideBrushTimeout] = useState(0)
@@ -80,6 +94,16 @@ export default function Editor(props: EditorProps) {
   const canApplyMask = Boolean(
     file && pendingLines.some(line => line.pts.length)
   )
+  const canRedo = Boolean(redoPendingLines.length || redoRenders.length)
+  const brushPresets = [18, 36, 72, 120]
+
+  function renderIcon(iconName: string) {
+    return (
+      <span className="material-symbols-rounded" aria-hidden="true">
+        {iconName}
+      </span>
+    )
+  }
 
   const draw = useCallback(
     (index = -1) => {
@@ -183,6 +207,8 @@ export default function Editor(props: EditorProps) {
       const newRender = new Image()
       newRender.dataset.id = Date.now().toString()
       await loadImage(newRender, res)
+      setRedoRenders([])
+      setRedoPendingLines([])
       setRenders(currentRenders => [...currentRenders, newRender])
       setPendingLines([])
     } catch (e: any) {
@@ -221,9 +247,12 @@ export default function Editor(props: EditorProps) {
   useEffect(() => {
     if (!file) {
       setRenders([])
+      setRedoRenders([])
       setPendingLines([])
+      setRedoPendingLines([])
       setShowOriginal(false)
       setSeparatorLeft(0)
+      setToolMode('brush')
     }
   }, [file])
 
@@ -282,9 +311,10 @@ export default function Editor(props: EditorProps) {
       if (!original.src || showOriginal) {
         return
       }
+      setRedoPendingLines([])
       setPendingLines(currentLines => [
         ...currentLines,
-        { size: brushSize, pts: [] },
+        { size: brushSize, pts: [], mode: toolMode },
       ])
       canvas.addEventListener('mousemove', onMouseDrag)
       canvas.addEventListener('mouseup', onPointerUp)
@@ -318,6 +348,7 @@ export default function Editor(props: EditorProps) {
     showOriginal,
     hideBrushTimeout,
     scaledBrushSize,
+    toolMode,
   ])
 
   useEffect(() => {
@@ -366,22 +397,52 @@ export default function Editor(props: EditorProps) {
 
   const undo = useCallback(async () => {
     if (pendingLines.length) {
+      const lastLine = pendingLines[pendingLines.length - 1]
       setPendingLines(currentLines => currentLines.slice(0, -1))
+      setRedoPendingLines(currentLines => [...currentLines, lastLine])
       return
     }
 
+    if (!renders.length) {
+      return
+    }
+
+    const lastRender = renders[renders.length - 1]
     setRenders(currentRenders => currentRenders.slice(0, -1))
+    setRedoRenders(currentRenders => [...currentRenders, lastRender])
     setShowOriginal(false)
     setSeparatorLeft(0)
-  }, [pendingLines.length])
+  }, [pendingLines, renders])
+
+  const redo = useCallback(() => {
+    if (redoPendingLines.length) {
+      const nextLine = redoPendingLines[redoPendingLines.length - 1]
+      setRedoPendingLines(currentLines => currentLines.slice(0, -1))
+      setPendingLines(currentLines => [...currentLines, nextLine])
+      return
+    }
+
+    if (!redoRenders.length) {
+      return
+    }
+
+    const nextRender = redoRenders[redoRenders.length - 1]
+    setRedoRenders(currentRenders => currentRenders.slice(0, -1))
+    setRenders(currentRenders => [...currentRenders, nextRender])
+  }, [redoPendingLines, redoRenders])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (!renders.length) {
+      if (!renders.length && !pendingLines.length) {
         return
       }
       const isCmdZ = (event.metaKey || event.ctrlKey) && event.key === 'z'
-      if (isCmdZ) {
+      const isCmdShiftZ =
+        (event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 'Z'
+      if (isCmdShiftZ) {
+        event.preventDefault()
+        redo()
+      } else if (isCmdZ) {
         event.preventDefault()
         undo()
       }
@@ -390,12 +451,14 @@ export default function Editor(props: EditorProps) {
     return () => {
       window.removeEventListener('keydown', handler)
     }
-  }, [renders, undo])
+  }, [renders, pendingLines.length, redo, undo])
 
   const backTo = useCallback(
     (index: number) => {
       setRenders(currentRenders => currentRenders.slice(0, Math.max(index, 0)))
+      setRedoRenders([])
       setPendingLines([])
+      setRedoPendingLines([])
       setShowOriginal(false)
       setSeparatorLeft(0)
       window.requestAnimationFrame(() => {
@@ -546,6 +609,8 @@ export default function Editor(props: EditorProps) {
       const newRender = new Image()
       newRender.dataset.id = Date.now().toString()
       await loadImage(newRender, res)
+      setRedoRenders([])
+      setRedoPendingLines([])
       setRenders(currentRenders => [...currentRenders, newRender])
       setPendingLines([])
     } catch (error) {
@@ -732,87 +797,132 @@ export default function Editor(props: EditorProps) {
           </div>
 
           <div className="mt-6 rounded-2xl border border-white/8 bg-black/20 p-4">
-            <p className="text-sm font-semibold text-slate-100">Tools</p>
-            <div className="mt-4 space-y-3">
-              <Slider
-                label={m.bruch_size()}
-                min={10}
-                max={200}
-                value={brushSize}
-                onChange={handleSliderChange}
-                onStart={handleSliderStart}
-              />
-              <div className="space-y-2">
-                {renders.length > 0 && (
-                  <Button
-                    primary
-                    className="w-full justify-center"
-                    onClick={undo}
-                    icon={
-                      <svg
-                        className="w-6 h-6"
-                        width="19"
-                        height="9"
-                        viewBox="0 0 19 9"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <path
-                          d="M2 1C2 0.447715 1.55228 0 1 0C0.447715 0 0 0.447715 0 1H2ZM1 8H0V9H1V8ZM8 9C8.55228 9 9 8.55229 9 8C9 7.44771 8.55228 7 8 7V9ZM16.5963 7.42809C16.8327 7.92721 17.429 8.14016 17.9281 7.90374C18.4272 7.66731 18.6402 7.07103 18.4037 6.57191L16.5963 7.42809ZM16.9468 5.83205L17.8505 5.40396L16.9468 5.83205ZM0 1V8H2V1H0ZM1 9H8V7H1V9ZM1.66896 8.74329L6.66896 4.24329L5.33104 2.75671L0.331035 7.25671L1.66896 8.74329ZM16.043 6.26014L16.5963 7.42809L18.4037 6.57191L17.8505 5.40396L16.043 6.26014ZM6.65079 4.25926C9.67554 1.66661 14.3376 2.65979 16.043 6.26014L17.8505 5.40396C15.5805 0.61182 9.37523 -0.710131 5.34921 2.74074L6.65079 4.25926Z"
-                          fill="currentColor"
-                        />
-                      </svg>
-                    }
-                  >
-                    {m.undo()}
-                  </Button>
-                )}
+            <p className="text-sm font-semibold text-slate-100">Actions</p>
+
+            <div className="mt-4 grid grid-cols-4 gap-2">
+              <Button
+                iconOnly
+                className="w-full"
+                disabled={!file}
+                icon={renderIcon('add_photo_alternate')}
+                onClick={onReset}
+              >
+                New
+              </Button>
+              <Button
+                iconOnly
+                className="w-full"
+                disabled={!renders.length && !pendingLines.length}
+                icon={renderIcon('undo')}
+                onClick={undo}
+              >
+                Undo
+              </Button>
+              <Button
+                iconOnly
+                className="w-full"
+                disabled={!canRedo}
+                icon={renderIcon('redo')}
+                onClick={redo}
+              >
+                Redo
+              </Button>
+              <Button
+                iconOnly
+                className="w-full"
+                disabled={toolsDisabled}
+                icon={renderIcon('download')}
+                onClick={download}
+              >
+                Download
+              </Button>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+              <p className="text-sm font-semibold text-slate-100">Tools</p>
+              <div className="mt-4 grid grid-cols-2 gap-2">
                 <Button
-                  primary={showOriginal}
+                  primary={toolMode === 'brush'}
                   className="w-full justify-center"
                   disabled={toolsDisabled}
-                  icon={<EyeIcon className="w-6 h-6" />}
-                  onUp={() => {
-                    setShowOriginal(!showOriginal)
-                    setTimeout(() => setSeparatorLeft(0), 300)
-                  }}
+                  icon={renderIcon('brush')}
+                  onClick={() => setToolMode('brush')}
                 >
-                  {m.original()}
-                </Button>
-                {!showOriginal && (
-                  <Button
-                    className="w-full justify-center"
-                    disabled={toolsDisabled}
-                    onUp={onSuperResolution}
-                  >
-                    {m.upscale()}
-                  </Button>
-                )}
-                <Button
-                  primary
-                  className="w-full justify-center"
-                  disabled={!canApplyMask || showOriginal}
-                  onClick={processMask}
-                >
-                  Apply Mask
+                  Brush
                 </Button>
                 <Button
-                  primary
+                  primary={toolMode === 'eraser'}
                   className="w-full justify-center"
                   disabled={toolsDisabled}
-                  icon={<DownloadIcon className="w-6 h-6" />}
-                  onClick={download}
+                  icon={renderIcon('ink_eraser')}
+                  onClick={() => setToolMode('eraser')}
                 >
-                  {m.download()}
-                </Button>
-                <Button
-                  className="w-full justify-center"
-                  disabled={!file}
-                  onClick={onReset}
-                >
-                  {m.start_new()}
+                  Eraser
                 </Button>
               </div>
+
+              <div className="mt-4 space-y-3">
+                <div className="flex items-center justify-between text-xs uppercase tracking-[0.22em] text-slate-500">
+                  <span>
+                    {toolMode === 'brush' ? 'Brush Size' : 'Eraser Size'}
+                  </span>
+                  <span>{brushSize}px</span>
+                </div>
+                <Slider
+                  label={m.bruch_size()}
+                  min={10}
+                  max={200}
+                  value={brushSize}
+                  onChange={handleSliderChange}
+                  onStart={handleSliderStart}
+                />
+                <div className="grid grid-cols-4 gap-2">
+                  {brushPresets.map(size => (
+                    <Button
+                      key={size}
+                      primary={brushSize === size}
+                      className="w-full justify-center px-0 text-sm"
+                      disabled={toolsDisabled}
+                      onClick={() => handleSliderChange(size)}
+                    >
+                      {size}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              <Button
+                primary
+                className="w-full justify-center"
+                disabled={!canApplyMask || showOriginal}
+                icon={renderIcon('auto_fix_high')}
+                onClick={processMask}
+              >
+                Apply
+              </Button>
+              <Button
+                primary
+                className="w-full justify-center"
+                disabled={toolsDisabled}
+                icon={renderIcon('compare')}
+                onClick={() => {
+                  setShowOriginal(!showOriginal)
+                  setTimeout(() => setSeparatorLeft(0), 300)
+                }}
+              >
+                Original Compare
+              </Button>
+              <Button
+                primary
+                className="w-full justify-center"
+                disabled={toolsDisabled || showOriginal}
+                icon={renderIcon('zoom_in')}
+                onClick={onSuperResolution}
+              >
+                4x Upscale
+              </Button>
             </div>
           </div>
 
